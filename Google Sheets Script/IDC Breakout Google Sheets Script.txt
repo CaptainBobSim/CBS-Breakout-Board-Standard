@@ -1,0 +1,128 @@
+"function exportTextToXMLforMFMC() {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  var data = sheet.getDataRange().getValues();
+
+  var analogPinMap = {
+    '0': '54', '1': '55', '2': '56', '3': '57', '4': '58',
+    '5': '59', '6': '60', '7': '61', '8': '62', '9': '63',
+    '10': '64', '11': '65', '12': '66', '13': '67', '14': '68', '15': '69'
+  };
+
+  var xml = [];
+  xml.push('<?xml version=""1.0"" encoding=""utf-8""?>');
+  xml.push('<Config xmlns:xsi=""http://www.w3.org/2001/XMLSchema-instance"" xmlns:xsd=""http://www.w3.org/2001/XMLSchema"">');
+  xml.push('  <ModuleType>MobiFlight Mega</ModuleType>');
+  xml.push('  <ModuleName>test file</ModuleName>');
+  xml.push('  <PowerSavingTime>600</PowerSavingTime>');
+
+  var encoders = {}; // Store encoder pairs
+  var steppers = {}; // Store stepper pins
+  var ledModules = {}; // Store LED 7-Segment modules
+
+  for (var i = 0; i < data.length; i++) {
+    var row = data[i];
+
+    var name = row[1].toString().trim();
+    var columnCValue = row[2].toString().trim();
+    var columnDValue = row[3].toString().trim();
+
+    // Skip unwanted rows
+    if (name === ""GND"" || name === ""5V"" || name === ""+5V"" || columnDValue === ""Empty"") {
+      continue;
+    }
+
+    columnCValue = columnCValue.replace(/\(.*?\)/g, '').trim(); // Remove anything in parentheses
+
+    var pinValue = """";
+    if (columnCValue.includes(""Digital"")) {
+      pinValue = columnCValue.replace(/\D/g, ''); // Extract only numbers
+    } else if (columnCValue.includes(""Analog"")) {
+      var match = columnCValue.match(/\d+/);
+      if (match) {
+        var pinNumber = match[0];
+        pinValue = analogPinMap[pinNumber] || pinNumber;
+      }
+    } else {
+      pinValue = columnCValue;
+    }
+
+    // Handle each device type
+    if (columnDValue === ""LED / Output"") {
+      xml.push('  <Output Name=""' + name + '"" Pin=""' + pinValue + '"" />');
+    } else if (columnDValue === ""LED 7-Segment"") {
+      var baseName = name.replace(/_(DIN|CS|CLK)$/, """"); // Extract base name
+      if (!ledModules[baseName]) {
+        ledModules[baseName] = { DinPin: """", ClsPin: """", ClkPin: """" };
+      }
+      if (name.endsWith(""_DIN"")) {
+        ledModules[baseName].DinPin = pinValue;
+      } else if (name.endsWith(""_CS"")) {
+        ledModules[baseName].ClsPin = pinValue;
+      } else if (name.endsWith(""_CLK"")) {
+        ledModules[baseName].ClkPin = pinValue;
+      }
+    } else if (columnDValue === ""Servo"") {
+      xml.push('  <Servo Name=""' + name + '"" DataPin=""' + pinValue + '"" />');
+    } else if (columnDValue === ""Button"") {
+      xml.push('  <Button Name=""' + name + '"" Pin=""' + pinValue + '"" />');
+    } else if (columnDValue === ""Analog Input"") {
+      xml.push('  <AnalogInput Name=""' + name + '"" Pin=""' + pinValue + '"" Sensitivity=""5"" />');
+    } else if (columnDValue === ""Encoder"") {
+      var baseName = name.replace(/_[AB]$/, """"); // Extract base name
+      if (!encoders[baseName]) {
+        encoders[baseName] = { A: """", B: """" };
+      }
+      if (name.endsWith(""_A"")) {
+        encoders[baseName].A = pinValue;
+      } else if (name.endsWith(""_B"")) {
+        encoders[baseName].B = pinValue;
+      }
+    } else if (columnDValue === ""Stepper"") {
+      var baseName = name.replace(/_IN[1-4]$/, """"); // Extract base name
+      if (!steppers[baseName]) {
+        steppers[baseName] = { IN1: """", IN2: """", IN3: """", IN4: """" };
+      }
+      if (name.endsWith(""_IN1"")) {
+        steppers[baseName].IN1 = pinValue;
+      } else if (name.endsWith(""_IN2"")) {
+        steppers[baseName].IN2 = pinValue;
+      } else if (name.endsWith(""_IN3"")) {
+        steppers[baseName].IN3 = pinValue;
+      } else if (name.endsWith(""_IN4"")) {
+        steppers[baseName].IN4 = pinValue;
+      }
+    } else if (columnDValue === ""LCD Display"") {
+      xml.push('  <LcdDisplay Name=""' + name + '"" Address=""39"" Cols=""16"" Lines=""2"" />');
+    }
+  }
+
+  // Add Encoders
+  for (var enc in encoders) {
+    if (encoders[enc].A && encoders[enc].B) {
+      xml.push('  <Encoder Name=""' + enc + '"" PinLeft=""' + encoders[enc].A + '"" PinRight=""' + encoders[enc].B + '"" EncoderType=""0"" />');
+    }
+  }
+
+  // Add Steppers
+  for (var step in steppers) {
+    if (steppers[step].IN1 && steppers[step].IN2 && steppers[step].IN3 && steppers[step].IN4) {
+      xml.push('  <Stepper Name=""' + step + '"" Pin1=""' + steppers[step].IN1 + '"" Pin2=""' + steppers[step].IN2 + '"" Pin3=""' + steppers[step].IN3 + '"" Pin4=""' + steppers[step].IN4 + '"" BtnPin=""0"" Mode=""0"" Backlash=""0"" Deactivate=""false"" Profile=""0"" />');
+    }
+  }
+
+  // Add LED 7-Segment
+  for (var led in ledModules) {
+    xml.push('  <LedModule Name=""' + led + '"" ModelType=""0"" DinPin=""' + ledModules[led].DinPin + '"" ClsPin=""' + ledModules[led].ClsPin + '"" ClkPin=""' + ledModules[led].ClkPin + '"" Brightness=""15"" NumModules=""1"" />');
+  }
+
+  xml.push('</Config>');
+
+  var xmlContent = xml.join('\n');
+  Logger.log(xmlContent);
+  var file = DriveApp.createFile('sheet_data.xml', xmlContent, 'application/xml');
+  Logger.log('XML file created: ' + file.getUrl());
+
+  // Display the XML content in a popup
+  var ui = SpreadsheetApp.getUi();
+  ui.alert('Generated XML', xmlContent, ui.ButtonSet.OK);
+}"
